@@ -1,3 +1,4 @@
+import numpy as np
 def read_stl_text(file_path):
     """
     Reads an ASCII STL file and extracts vertex coordinates and face indices.
