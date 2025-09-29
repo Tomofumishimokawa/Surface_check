@@ -2,7 +2,6 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-
 def read_stl_text(file_path):
     """
     Reads an ASCII STL file and extracts vertex coordinates and face indices.
