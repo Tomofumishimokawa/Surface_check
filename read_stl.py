@@ -152,3 +152,55 @@ def prepare_data_from_csv(file_names, num_points=5000, device='cuda'):
     input_tensor = torch.tensor(input_data, dtype=torch.float32).to(device)
 
     return DataLoader(TensorDataset(input_tensor), batch_size=1, shuffle=False)
+
+
+
+import numpy as np
+import open3d as o3d
+
+# ==== 1. x,y,z のテーブルを読み込む ====
+# npy形式: x,y,z の列が0,1,2列目にある前提
+points = np.load("../Train_data_npy/pipe_data_10mm.npy")[:, :3]
+
+# ==== 2. Open3D PointCloud に変換 ====
+pcd = o3d.geometry.PointCloud()
+pcd.points = o3d.utility.Vector3dVector(points)
+
+# ==== 法線推定 ====
+pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=15))
+normals = np.asarray(pcd.normals)  # (N, 3) 配列
+
+# ==== 3. KDTree を構築 ====
+pcd_tree = o3d.geometry.KDTreeFlann(pcd)
+
+# ==== 4. 曲率・knn平均距離配列を初期化 ====
+num_points = points.shape[0]
+curvatures = np.zeros(num_points)
+knn_mean_dists = np.zeros(num_points)
+
+k = 15  # 近傍点数：配管なら 20〜50 くらいが目安
+
+# ==== 5. PCAによる曲率計算・knn平均距離計算 ====
+for i in range(num_points):
+    [_, idx, dists] = pcd_tree.search_knn_vector_3d(points[i], k)
+    neighbors = points[idx, :]
+    cov = np.cov(neighbors.T)
+    eigvals, _ = np.linalg.eigh(cov)
+    eigvals = np.sort(eigvals)
+    curvatures[i] = eigvals[0] / np.sum(eigvals)
+    # dists[0]は自身との距離0なので除外
+    knn_mean_dists[i] = np.mean(np.sqrt(dists[1:]))
+
+# ==== 6. 曲率を色で可視化 ====
+curv_min, curv_max = np.min(curvatures), np.max(curvatures)
+norm_curv = (curvatures - curv_min) / (curv_max - curv_min)
+colors = np.vstack([norm_curv, np.zeros_like(norm_curv), 1 - norm_curv]).T  # 青〜赤グラデーション
+pcd.colors = o3d.utility.Vector3dVector(colors)
+
+# ==== 7. 保存と可視化 ====
+o3d.io.write_point_cloud("pipe_with_curvature.ply", pcd)
+o3d.visualization.draw_geometries([pcd])
+
+# ==== 8. CSV出力（x,y,z,curvature,knn_mean_dist,nx,ny,nz） ====
+output = np.hstack([points, curvatures.reshape(-1, 1), knn_mean_dists.reshape(-1, 1), normals])
+np.savetxt("pipe_xyz_with_curvature_normals_knnmeandist.csv", output, delimiter=",", header="x,y,z,curvature,knn_mean_dist,nx,ny,nz", comments="")
